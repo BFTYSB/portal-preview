@@ -6,17 +6,17 @@ import com.yiyihehe.portalpreview.config.ModConfig;
 import com.yiyihehe.portalpreview.math.PortalCalculator;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.render.RenderLayer;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.render.VertexConsumerProvider;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.World;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 
 import java.util.List;
 
@@ -24,15 +24,14 @@ import java.util.List;
 public class PortalPreviewRenderer {
 
     public static void register() {
-        // 1.21.1: WorldRenderEvents（26.1 的 LevelRenderEvents 在 1.21.1 不存在）
-        WorldRenderEvents.AFTER_TRANSLUCENT.register(PortalPreviewRenderer::render);
+        LevelRenderEvents.AFTER_TRANSLUCENT_FEATURES.register(PortalPreviewRenderer::render);
     }
 
-    public static void render(WorldRenderContext context) {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.world == null || client.player == null) return;
+    public static void render(LevelRenderContext context) {
+        Minecraft client = Minecraft.getInstance();
+        if (client.level == null || client.player == null) return;
 
-        if (client.world.getRegistryKey() != World.OVERWORLD) return;
+        if (client.level.dimension() != Level.OVERWORLD) return;
         if (!PortalPreviewClient.overworldRenderEnabled) return;
         if (PortalPreviewClient.previewOverworldPos == null) return;
 
@@ -41,43 +40,42 @@ public class PortalPreviewRenderer {
         Direction dir = PortalPreviewClient.previewDirection;
 
         // 距离检测（512格内显示）
-        double dist = client.player.getPos().distanceTo(basePos.toCenterPos());
+        double dist = client.player.position().distanceTo(basePos.getCenter());
         if (dist > 512.0) return;
 
         // 获取门框所有方块位置
         List<BlockPos> frameBlocks = PortalCalculator.getFrameBlocks(basePos, dir);
 
-        MatrixStack matrixStack = context.matrixStack();
-        Vec3d cameraPos = context.camera().getPos();
+        PoseStack poseStack = context.poseStack();
+        Vec3 cameraPos = client.gameRenderer.getMainCamera().position();
 
-        matrixStack.push();
-        matrixStack.translate(-cameraPos.x, -cameraPos.y, -cameraPos.z);
+        poseStack.pushPose();
+        poseStack.translate(-cameraPos.x, -cameraPos.y, -cameraPos.z);
 
-        VertexConsumerProvider consumers = context.consumers();
+        MultiBufferSource.BufferSource bufferSource = context.bufferSource();
 
-        // 1.21.1: RenderLayer.getLines() 对应 26.1 的 RenderTypes.lines()
-        VertexConsumer lineConsumer = consumers.getBuffer(RenderLayer.getLines());
+        // 26.1+ 轮廓线使用 RenderTypes.lines()，需要 POSITION + COLOR + NORMAL + LineWidth
+        VertexConsumer lineConsumer = bufferSource.getBuffer(RenderTypes.lines());
 
         float alpha = config.previewOpacity / 255.0f;
         float r = 0.2f, g = 0.8f, b = 1.0f;
 
         for (BlockPos pos : frameBlocks) {
             if (PortalPreviewClient.builtPortalBlocks.contains(pos)) continue;
-            renderBlockOutline(lineConsumer, matrixStack.peek(), pos, r, g, b, alpha);
+            renderBlockOutline(lineConsumer, poseStack.last(), pos, r, g, b, alpha);
         }
 
-        // 1.21.1: RenderLayer.getDebugQuads() 对应 26.1 的 RenderTypes.debugQuads()
-        // 仅需要 POSITION + COLOR，无需法线
-        VertexConsumer fillConsumer = consumers.getBuffer(RenderLayer.getDebugQuads());
+        // 26.1+ 填充面使用 debugQuads，只需要 POSITION + COLOR
+        VertexConsumer fillConsumer = bufferSource.getBuffer(RenderTypes.debugQuads());
         for (BlockPos pos : frameBlocks) {
             if (PortalPreviewClient.builtPortalBlocks.contains(pos)) continue;
-            renderGhostBlockFill(fillConsumer, matrixStack.peek(), pos, r, g, b, alpha * 0.3f);
+            renderGhostBlockFill(fillConsumer, poseStack.last(), pos, r, g, b, alpha * 0.3f);
         }
 
-        matrixStack.pop();
+        poseStack.popPose();
     }
 
-    private static void renderBlockOutline(VertexConsumer consumer, MatrixStack.Entry pose, BlockPos pos, float red, float green, float blue, float alpha) {
+    private static void renderBlockOutline(VertexConsumer consumer, PoseStack.Pose pose, BlockPos pos, float red, float green, float blue, float alpha) {
         float x = pos.getX();
         float y = pos.getY();
         float z = pos.getZ();
@@ -104,7 +102,7 @@ public class PortalPreviewRenderer {
         line(consumer, pose, x, y, z2, x, y2, z2, red, green, blue, alpha);
     }
 
-    private static void renderGhostBlockFill(VertexConsumer consumer, MatrixStack.Entry pose, BlockPos pos, float red, float green, float blue, float alpha) {
+    private static void renderGhostBlockFill(VertexConsumer consumer, PoseStack.Pose pose, BlockPos pos, float red, float green, float blue, float alpha) {
         float x = pos.getX();
         float y = pos.getY();
         float z = pos.getZ();
@@ -127,11 +125,9 @@ public class PortalPreviewRenderer {
     }
 
     /**
-     * 1.21.1: VertexConsumer 链式 API —— vertex(matrix, x,y,z).color(r,g,b,a).normal(...)
-     * 1.21.1 无终结方法（26.1 的 addVertex/setColor/setNormal/setLineWidth 与 next() 均不存在，
-     * 顶点在最后一个元素写入后自动提交）；lines 层线宽固定，无 per-vertex setLineWidth
+     * 26.1+ RenderTypes.lines() 需要 Normal 和 LineWidth
      */
-    private static void line(VertexConsumer consumer, MatrixStack.Entry pose, float x1, float y1, float z1, float x2, float y2, float z2, float r, float g, float b, float a) {
+    private static void line(VertexConsumer consumer, PoseStack.Pose pose, float x1, float y1, float z1, float x2, float y2, float z2, float r, float g, float b, float a) {
         // 计算线段方向作为法线
         float dx = x2 - x1;
         float dy = y2 - y1;
@@ -145,23 +141,25 @@ public class PortalPreviewRenderer {
             dx = 0; dy = 1; dz = 0;
         }
 
-        consumer.vertex(pose, x1, y1, z1)
-            .color(r, g, b, a)
-            .normal(pose, dx, dy, dz);
-        consumer.vertex(pose, x2, y2, z2)
-            .color(r, g, b, a)
-            .normal(pose, dx, dy, dz);
+        consumer.addVertex(pose, x1, y1, z1)
+            .setColor(r, g, b, a)
+            .setNormal(dx, dy, dz)
+            .setLineWidth(2.0f);
+        consumer.addVertex(pose, x2, y2, z2)
+            .setColor(r, g, b, a)
+            .setNormal(dx, dy, dz)
+            .setLineWidth(2.0f);
     }
 
-    private static void quad(VertexConsumer consumer, MatrixStack.Entry pose,
+    private static void quad(VertexConsumer consumer, PoseStack.Pose pose,
                              float x1, float y1, float z1,
                              float x2, float y2, float z2,
                              float x3, float y3, float z3,
                              float x4, float y4, float z4,
                              float r, float g, float b, float a) {
-        consumer.vertex(pose, x1, y1, z1).color(r, g, b, a);
-        consumer.vertex(pose, x2, y2, z2).color(r, g, b, a);
-        consumer.vertex(pose, x3, y3, z3).color(r, g, b, a);
-        consumer.vertex(pose, x4, y4, z4).color(r, g, b, a);
+        consumer.addVertex(pose, x1, y1, z1).setColor(r, g, b, a);
+        consumer.addVertex(pose, x2, y2, z2).setColor(r, g, b, a);
+        consumer.addVertex(pose, x3, y3, z3).setColor(r, g, b, a);
+        consumer.addVertex(pose, x4, y4, z4).setColor(r, g, b, a);
     }
 }

@@ -1,13 +1,12 @@
 package com.yiyihehe.portalpreview.math;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.world.World;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
 
 public class PortalFrameScanner {
 
@@ -19,14 +18,14 @@ public class PortalFrameScanner {
     /**
      * 扫描玩家附近的黑曜石门框
      */
-    public static PortalFrame findNearestFrame(World world, BlockPos center) {
+    public static PortalFrame findNearestFrame(Level level, BlockPos center) {
         // 收集附近所有黑曜石位置
         Set<BlockPos> obsidianSet = new HashSet<>();
         for (int dx = -MAX_SCAN_RADIUS; dx <= MAX_SCAN_RADIUS; dx++) {
             for (int dy = -8; dy <= 24; dy++) {
                 for (int dz = -MAX_SCAN_RADIUS; dz <= MAX_SCAN_RADIUS; dz++) {
-                    BlockPos pos = center.add(dx, dy, dz);
-                    if (world.getBlockState(pos).isOf(Blocks.OBSIDIAN)) {
+                    BlockPos pos = center.offset(dx, dy, dz);
+                    if (level.getBlockState(pos).is(Blocks.OBSIDIAN)) {
                         obsidianSet.add(pos);
                     }
                 }
@@ -42,10 +41,10 @@ public class PortalFrameScanner {
         for (BlockPos start : obsidianSet) {
             // 尝试两个水平方向
             for (Direction faceDir : new Direction[]{Direction.NORTH, Direction.EAST}) {
-                Direction leftDir = faceDir.rotateYCounterclockwise(); // 从右下往左下
-                PortalFrame frame = tryFrame(world, start, faceDir, leftDir, obsidianSet);
+                Direction leftDir = faceDir.getCounterClockWise(); // 从右下往左下
+                PortalFrame frame = tryFrame(level, start, faceDir, leftDir, obsidianSet);
                 if (frame != null) {
-                    double dist = frame.center.getSquaredDistance(center);
+                    double dist = frame.center.distSqr(center);
                     if (dist < bestDist) {
                         bestDist = dist;
                         bestFrame = frame;
@@ -62,7 +61,7 @@ public class PortalFrameScanner {
      * faceDir: 门框面朝方向（厚度方向）
      * leftDir: 从右下往左下（沿底边）
      */
-    private static PortalFrame tryFrame(World world, BlockPos start, Direction faceDir, Direction leftDir, Set<BlockPos> obsidianSet) {
+    private static PortalFrame tryFrame(Level level, BlockPos start, Direction faceDir, Direction leftDir, Set<BlockPos> obsidianSet) {
         Direction up = Direction.UP;
 
         // 1. 测量底边长度（从 start 往 leftDir 方向数）
@@ -75,9 +74,9 @@ public class PortalFrameScanner {
 
         // 3. 确定四个角
         BlockPos bottomRight = start;
-        BlockPos bottomLeft = start.offset(leftDir, width - 1);
-        BlockPos topRight = start.offset(up, height - 1);
-        BlockPos topLeft = bottomLeft.offset(up, height - 1);
+        BlockPos bottomLeft = start.relative(leftDir, width - 1);
+        BlockPos topRight = start.relative(up, height - 1);
+        BlockPos topLeft = bottomLeft.relative(up, height - 1);
 
         // 4. 验证四个角都是黑曜石
         if (!obsidianSet.contains(bottomRight)) return null;
@@ -87,36 +86,36 @@ public class PortalFrameScanner {
 
         // 5. 验证底边完整
         for (int i = 0; i < width; i++) {
-            if (!obsidianSet.contains(bottomRight.offset(leftDir, i))) return null;
+            if (!obsidianSet.contains(bottomRight.relative(leftDir, i))) return null;
         }
 
         // 6. 验证顶边完整
         for (int i = 0; i < width; i++) {
-            if (!obsidianSet.contains(topRight.offset(leftDir, i))) return null;
+            if (!obsidianSet.contains(topRight.relative(leftDir, i))) return null;
         }
 
         // 7. 验证左边完整
         for (int i = 0; i < height; i++) {
-            if (!obsidianSet.contains(bottomLeft.offset(up, i))) return null;
+            if (!obsidianSet.contains(bottomLeft.relative(up, i))) return null;
         }
 
         // 8. 验证右边完整
         for (int i = 0; i < height; i++) {
-            if (!obsidianSet.contains(bottomRight.offset(up, i))) return null;
+            if (!obsidianSet.contains(bottomRight.relative(up, i))) return null;
         }
 
         // 9. 验证内部是空气或传送门
-        if (!validateInterior(world, bottomLeft, leftDir.getOpposite(), up, width, height)) return null;
+        if (!validateInterior(level, bottomLeft, leftDir.getOpposite(), up, width, height)) return null;
 
         // 门框中心
-        BlockPos center = bottomLeft.offset(leftDir.getOpposite(), width / 2).offset(up, height / 2);
+        BlockPos center = bottomLeft.relative(leftDir.getOpposite(), width / 2).relative(up, height / 2);
         return new PortalFrame(bottomLeft, center, faceDir, width, height);
     }
 
     private static int countObsidian(BlockPos start, Direction dir, Set<BlockPos> obsidianSet, int max) {
         int count = 1; // 包含起点
         for (int i = 1; i < max; i++) {
-            if (obsidianSet.contains(start.offset(dir, i))) {
+            if (obsidianSet.contains(start.relative(dir, i))) {
                 count++;
             } else {
                 break;
@@ -125,12 +124,12 @@ public class PortalFrameScanner {
         return count;
     }
 
-    private static boolean validateInterior(World world, BlockPos bottomLeft, Direction rightDir, Direction up, int width, int height) {
+    private static boolean validateInterior(Level level, BlockPos bottomLeft, Direction rightDir, Direction up, int width, int height) {
         for (int x = 1; x < width - 1; x++) {
             for (int y = 1; y < height - 1; y++) {
-                BlockPos pos = bottomLeft.offset(rightDir, x).offset(up, y);
-                BlockState state = world.getBlockState(pos);
-                if (!state.isAir() && !state.isOf(Blocks.NETHER_PORTAL)) {
+                BlockPos pos = bottomLeft.relative(rightDir, x).relative(up, y);
+                BlockState state = level.getBlockState(pos);
+                if (!state.isAir() && !state.is(Blocks.NETHER_PORTAL)) {
                     return false;
                 }
             }
