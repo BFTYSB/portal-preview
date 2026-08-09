@@ -1,7 +1,7 @@
 package com.yiyihehe.portalpreview.math;
 
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -39,12 +39,12 @@ public class PortalCalculator {
      */
     public static List<BlockPos> getFrameBlocks(BlockPos basePos, Direction faceDir) {
         List<BlockPos> blocks = new ArrayList<>();
-        Direction widthDir = faceDir.getCounterClockWise();
+        Direction widthDir = faceDir.rotateYCounterclockwise();
 
         for (int y = 0; y < 5; y++) {
             for (int w = 0; w < 4; w++) {
                 if (y == 0 || y == 4 || w == 0 || w == 3) {
-                    blocks.add(basePos.above(y).relative(widthDir, w));
+                    blocks.add(basePos.up(y).offset(widthDir, w));
                 }
             }
         }
