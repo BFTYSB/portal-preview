@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "portal-preview",
+  "version": "${version}",
+  "name": "BF煎饼猫",
+  "description": "Preview overworld nether portal locations from the Nether.",
+  "authors": ["BFtysb"],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/portal-preview/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.yiyihehe.portalpreview.PortalPreviewClient"
+    ],
+    "modmenu": [
+      "com.yiyihehe.portalpreview.integration.ModMenuIntegration"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.0",
+    "minecraft": "~26.2.0",
+    "java": ">=25",
+    "fabric-api": "*",
+    "cloth-config": ">=26.2.0"
+  },
+  "suggests": {
+    "modmenu": ">=19.0.0-alpha.1"
+  }
+}
